@@ -9,24 +9,25 @@
 #define HEIGHT_OFFSET 0x0016
 #define WIDTH_OFFSET 0x0012
 #define BITS_PER_PIXEL_OFFSET 0x001C
+#define COLOR_TABLE_OFFSET 0x0032
 
-void readBmp(const char* filename, char **pixels, int *height, int *width, int *bytesPerPixel);
+char* readBmp(const char* filename, char **pixels, int *height, int *width, int *bytesPerPixel, char **colorTable);
 void cropBMP(const char* filename, char *pixels, int height, int width, int bytesPerPixel);
-void writeBMP(const char* filename, char *pixels, int height, int width, int bytesPerPixel);
+void writeBMP(const char* filename, char *pixels, int height, int width, int bytesPerPixel, char colorTable);
 
 
 int main()
 {
 	//variables to read in then use is write
-	char* pixels;
+	char* pixels, *colorTable;
 	int height, width, bytesPerPixel;
-	readBmp("./GivenImg/fozzie-in.bmp", &pixels, &height, &width, &bytesPerPixel);
+	char *temp = readBmp("./GivenImg/fozzie-in.bmp", &pixels, &height, &width, &bytesPerPixel, &colorTable);
 	//cropBMP("./GivenImg/fozzie-in.bmp", pixels, height, width, bytesPerPixel);
-	writeBMP("./GivenImg/fozzie-out.bmp", pixels, height, width, bytesPerPixel);
+	writeBMP("./GivenImg/fozzie-out.bmp", temp, height, width, bytesPerPixel, *colorTable);
 
 }
 
-void readBmp(const char* filename, char **pixels, int *height, int *width, int *bytesPerPixel)
+char* readBmp(const char* filename, char **pixels, int *height, int *width, int *bytesPerPixel, char **colorTable)
 {
 	//BMPs are separated into a few sections
 	//File header: provides information about the file itself
@@ -42,6 +43,26 @@ void readBmp(const char* filename, char **pixels, int *height, int *width, int *
 	if (err != 0) {
 		std::cout << "Error Reading file.";
 	}
+
+	//int fileSize;
+
+	//fseek(streamIn, 0, SEEK_END);
+	//fileSize = ftell(streamIn);
+	//fseek(streamIn, 0, SEEK_SET);
+
+	//char temp2[40000];
+	//fread(temp2, 1, fileSize, streamIn);
+
+	//FILE *streamOut;
+	////Read in image to crop
+	//err = fopen_s(&streamOut, "./GivenImg/fozzie-out.bmp", "wb");
+	//if (err != 0) {
+	//	std::cout << "Error Reading file.";
+	//}
+
+	//fwrite(temp2, 1, fileSize, streamOut);
+
+	//return temp2;
 
 	//Now we can start extracting data from the file header
 	int dataOffset;
@@ -64,29 +85,47 @@ void readBmp(const char* filename, char **pixels, int *height, int *width, int *
 	//allocate enough memory to contain pixel data
 	int paddedRowSize = (int)(4 * ceil((float)(*width) / 4.0f)) * (*bytesPerPixel);
 	int unpaddedRowSize = *width * (*bytesPerPixel);
-	int totalSize = unpaddedRowSize * (*height);
+	int totalSize = unpaddedRowSize * (*height) * 3;
 
 	*pixels = new char[totalSize];
+	char temp[14400] = {};
+
+	*colorTable = new char[256 * 4];
+
+	//Take care of the Color Table. for 8-bit this will have 256 colors used
+	//Color table is 4 x numColors Bytes
+	fseek(streamIn, COLOR_TABLE_OFFSET, SEEK_SET);
+	fread(*colorTable, 1, 4 * 256, streamIn);
+
 
 	//Set address to be ready to read the last pixel first, then work backwords because bitmaps store data strangely
 	char *currentRowPointer = *pixels + ((*height - 1) * unpaddedRowSize);
 
-	//fseek(streamIn, dataOffset, SEEK_SET);
-	//fread(pixels, sizeof(unsigned char), totalSize, streamIn);
-	for (int i = 0; i < *height; i++)
+	fseek(streamIn, dataOffset, SEEK_SET);
+	int test = fread(&temp, sizeof(unsigned char), totalSize, streamIn);
+	std::cout << "Size of read: " << test << "\n\n";
+	/*for (int i = 0; i < *height; i++)
 	{
-		int x = dataOffset + (i * paddedRowSize);
-		fseek(streamIn, x, SEEK_SET);
+		fseek(streamIn, dataOffset + (i * paddedRowSize), SEEK_SET);
 		int test = fread(currentRowPointer, 1, unpaddedRowSize, streamIn);
 		std::cout << "Size of read: " << test << "\n";
 		currentRowPointer -= unpaddedRowSize;
+	}*/
+	for (int i = 0; i < 14400; i++)
+	{
+		if (temp[i] != 0)
+		{
+			std::cout << "ACTUAL VALUE: " << i << "!!!";
+		}
 	}
 
-	std::cout << "\nPixel array: " << *pixels;
+	std::cout << "\nPixel array: " << temp[2488];
 
 	fclose(streamIn);
 
 	std::cin;
+
+	return temp;
 }
 
 void cropBMP(const char* filename, char *pixels, int height, int width, int bytesPerPixel){
@@ -94,7 +133,7 @@ void cropBMP(const char* filename, char *pixels, int height, int width, int byte
 
 }
 
-void writeBMP(const char* filename, char *pixels, int height, int width, int bytesPerPixel) {
+void writeBMP(const char* filename, char *pixels, int height, int width, int bytesPerPixel, char colorTable) {
 	FILE *streamOut;
 	errno_t err;
 	//Read in image to crop
@@ -115,8 +154,8 @@ void writeBMP(const char* filename, char *pixels, int height, int width, int byt
 	//Reserved 4 bytes
 	int reserved = 0x0000;
 	fwrite(&reserved, 4, 1, streamOut);
-	//Data offset 4 bytes. Where the headers end and data starts. Bitmap head (14) + info header (40) = 54
-	fwrite("54", 4, 1, streamOut);
+	//Data offset 4 bytes. Where the headers end and data starts. Bitmap head (14) + info header (40) + colorTable (1024) = 1078
+	fwrite("1078", 4, 1, streamOut);
 
 	//Info header time
 	//Size of the info header(40), 4 bytes
@@ -139,9 +178,11 @@ void writeBMP(const char* filename, char *pixels, int height, int width, int byt
 	fwrite("11811", 4, 1, streamOut);
 	fwrite("11811", 4, 1, streamOut);
 	//Colors used, 4 bytes
-	fwrite("0", 4, 1, streamOut);
+	fwrite("256", 4, 1, streamOut);
 	//Important Colors, 4 bytes
 	fwrite("0", 4, 1, streamOut);
+	//Color Table, 4 * number of colors
+	fwrite(&colorTable, 1, 4 * 256, streamOut);
 
 	//Pixel time. BMP is weird so start at the bottom and work our way up
 	int unpaddedRowSize = width * bytesPerPixel;
