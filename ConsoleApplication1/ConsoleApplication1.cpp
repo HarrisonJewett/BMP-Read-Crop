@@ -9,10 +9,10 @@
 #define HEIGHT_OFFSET 0x0016
 #define WIDTH_OFFSET 0x0012
 #define BITS_PER_PIXEL_OFFSET 0x001C
-#define COLOR_TABLE_OFFSET 0x0032
+#define COLOR_TABLE_OFFSET 0x0036
 
 void readBmp(const char* filename, char **pixels, int *height, int *width, int *bytesPerPixel, char **colorTable);
-void cropBMP(const char* filename, char *pixels, int height, int width, int bytesPerPixel, char **colorTable);
+char* cropBMP(const char* filename, char *pixels, int *height, int *width, int bytesPerPixel, char **colorTable);
 void writeBMP(const char* filename, char *pixels, int height, int width, int bytesPerPixel, char **colorTable);
 
 
@@ -23,9 +23,11 @@ int main()
 	int height, width, bytesPerPixel;
 	//char *temp = readBmp("./GivenImg/fozzie-in.bmp", &pixels, &height, &width, &bytesPerPixel, &colorTable);
 	readBmp("./GivenImg/fozzie-in.bmp", &pixels, &height, &width, &bytesPerPixel, &colorTable);
-	//cropBMP("./GivenImg/fozzie-in.bmp", pixels, height, width, bytesPerPixel, &colorTable);
+	pixels = cropBMP("./GivenImg/fozzie-in.bmp", pixels, &height, &width, bytesPerPixel, &colorTable);
 	writeBMP("./GivenImg/fozzie-out.bmp", pixels, height, width, bytesPerPixel, &colorTable);
-
+	delete pixels;
+	delete colorTable;
+	_CrtDumpMemoryLeaks();
 }
 
 void readBmp(const char* filename, char **pixels, int *height, int *width, int *bytesPerPixel, char **colorTable)
@@ -95,7 +97,7 @@ void readBmp(const char* filename, char **pixels, int *height, int *width, int *
 	std::cin;
 }
 
-void cropBMP(const char* filename, char *pixels, int height, int width, int bytesPerPixel, char **colorTable){
+char* cropBMP(const char* filename, char *pixels, int *height, int *width, int bytesPerPixel, char **colorTable){
 	FILE *streamIn;
 	errno_t err;
 	//Read in image to crop
@@ -104,19 +106,54 @@ void cropBMP(const char* filename, char *pixels, int height, int width, int byte
 		std::cout << "Error Reading file.";
 	}
 
-	int paddedRowSize = (int)(4 * ceil((float)(width) / 4.0f)) * bytesPerPixel;
-	int unpaddedRowSize = width * bytesPerPixel;
-	int totalSize = unpaddedRowSize * height * 3;
+	int paddedRowSize = (int)(4 * ceil((float)(*width) / 4.0f)) * bytesPerPixel;
+	int unpaddedRowSize = (*width) * bytesPerPixel;
+	int totalSize = unpaddedRowSize * (*height);
 
-	//Loop through pixels, start logging which lines we don't want anymore.
+	//Loop through pixels, find inner bounding box
+	int rightBound = 0;
+	int leftBound = 120;
+	int topBound = 120;
+	int botBound = 0;
+	for (int i = 0; i < totalSize; i++){
+		if (pixels[i] != 0) {
+			if (i % 120 > rightBound) rightBound = i % 120;
+			if (i % 120 < leftBound) leftBound = i % 120;
+			if (i != 0)
+			{
+				int yCoord = (i - (i % 120)) / 120;
+				if (yCoord > rightBound) botBound = yCoord;
+				if (yCoord < topBound) topBound = yCoord;
+			}
+		}
+	}
+	*height = botBound - topBound;
+	*width = rightBound - leftBound;
+	char* newArray = new char[(*width) * (*height)];
+	int j = 0;
+	for (int i = 0; i < totalSize; i++)
+	{
+		if (i % 120 < rightBound && i % 120 >= leftBound)
+		{
+			int yCoord = (i - (i % 120)) / 120;
+			if (yCoord > topBound && yCoord <= botBound) {
+				newArray[j] = pixels[i];
+				j++;
+			}
+		}
+	}
+	fclose(streamIn);
 
+	delete pixels;
+
+	return newArray;
 }
 
 void writeBMP(const char* filename, char *pixels, int height, int width, int bytesPerPixel, char **colorTable) {
 	FILE *streamOut;
 	errno_t err;
 	//Read in image to crop
-	err = fopen_s(&streamOut, "./GivenImg/fozzie-out.bmp", "wb");
+	err = fopen_s(&streamOut, filename, "wb");
 	if (err != 0) {
 		std::cout << "Error Reading file.";
 	}
@@ -159,7 +196,7 @@ void writeBMP(const char* filename, char *pixels, int height, int width, int byt
 	int imageSize = width * height*bytesPerPixel;
 	fwrite(&imageSize, 4, 1, streamOut);
 	//Pixels per meter in X axis and Y, 4 bytes
-	int ppm = 11811;
+	int ppm = 2835;
 	fwrite(&ppm, 4, 1, streamOut);
 	fwrite(&ppm, 4, 1, streamOut);
 	//Colors used, 4 bytes
@@ -173,6 +210,7 @@ void writeBMP(const char* filename, char *pixels, int height, int width, int byt
 
 	//Pixel time. BMP is weird so start at the bottom and work our way up
 	int unpaddedRowSize = width * bytesPerPixel;
+	//fwrite(&pixels, 1, imageSize, streamOut);
 	for (int i = 0; i < height; i++)
 	{
 		int pixelOffset = ((height - i) - 1) * unpaddedRowSize;
